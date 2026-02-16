@@ -18,6 +18,16 @@ CREATE TABLE Data_Quality_Logs (
     RawRecordID INT -- References Staging_API_Response if applicable
 );
 
+-- Pipeline Execution Logging
+DROP TABLE IF EXISTS Pipeline_Run_Logs CASCADE;
+CREATE TABLE Pipeline_Run_Logs (
+    RunID SERIAL PRIMARY KEY,
+    StartedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    EndedAt TIMESTAMP,
+    Status VARCHAR(20) CHECK (Status IN ('RUNNING', 'SUCCESS', 'FAILED')) NOT NULL DEFAULT 'RUNNING',
+    ErrorMessage TEXT
+);
+
 -- Dimension Tables
 DROP TABLE IF EXISTS Dim_Currency CASCADE;
 CREATE TABLE Dim_Currency (
@@ -60,3 +70,4 @@ CREATE TABLE Fact_Market_Metrics (
 CREATE INDEX idx_fact_currency ON Fact_Market_Metrics(CurrencyID);
 CREATE INDEX idx_fact_date ON Fact_Market_Metrics(DateID);
 CREATE INDEX idx_staging_ingest ON Staging_API_Response(IngestedAt);
+CREATE INDEX idx_pipeline_started ON Pipeline_Run_Logs(StartedAt);
