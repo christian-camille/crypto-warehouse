@@ -10,7 +10,7 @@ This project dumps raw JSON data from the CoinGecko API into a staging table in 
 
 - **Python 3.8+**
 - **PostgreSQL 12+**
-- **Pip packages**: `requests`, `psycopg2-binary`, `python-dotenv`
+- **Pip packages**: `requests`, `psycopg2-binary`, `python-dotenv`, `fastapi`, `uvicorn`
 
 ## Setup
 
@@ -36,6 +36,17 @@ To fetch data and process it immediately:
 ```bash
 python src/extract_load.py
 ```
+
+### Run the Metrics API
+Start the REST API to expose pipeline, data quality, and performance metrics:
+```bash
+uvicorn api:app --app-dir src --reload
+```
+
+Endpoints:
+- `GET /metrics/pipeline`
+- `GET /metrics/data-quality`
+- `GET /metrics/performance`
 
 ### Scheduling
 To simulate a streaming environment, schedule the script to run every 10-30 minutes.
@@ -65,3 +76,4 @@ To simulate a streaming environment, schedule the script to run every 10-30 minu
     -   `vw_MovingAverages`
     -   `vw_Volatility`
     -   `vw_DailyVolumeRank`
+5.  **Observe**: Pipeline run status is tracked in `Pipeline_Run_Logs` and surfaced via the API.
