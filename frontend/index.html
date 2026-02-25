@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Crypto Warehouse | Pipeline Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Fraunces:opsz,wght@9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Crypto Warehouse</p>
+          <h1>Pipeline Observability</h1>
+          <p class="subhead">
+            Live readout of pipeline health, data quality, and performance
+            signals. Metrics are pulled from the Crypto Warehouse REST API.
+          </p>
+          <div class="meta">
+            <div class="meta-item">
+              <span>Last refresh</span>
+               <strong id="last-refresh">—</strong>
+            </div>
+            <div class="meta-item">
+              <span>Timezone</span>
+              <strong>UTC</strong>
+            </div>
+          </div>
+        </div>
+        <div class="hero-panel">
+          <div class="hero-grid">
+            <div class="hero-card">
+              <span>Status</span>
+               <strong id="pipeline-status" class="status">—</strong>
+            </div>
+            <div class="hero-card">
+              <span>Last run</span>
+               <strong id="pipeline-last-run">—</strong>
+            </div>
+            <div class="hero-card">
+              <span>Frequency</span>
+               <strong id="pipeline-frequency">—</strong>
+            </div>
+            <div class="hero-card">
+              <span>Runs today</span>
+               <strong id="pipeline-runs">—</strong>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <main class="grid">
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h2>Pipeline health</h2>
+              <p>Track last run status and schedule reliability.</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="stat">
+              <span>Last run status</span>
+               <strong id="pipeline-run-status">—</strong>
+            </div>
+            <div class="stat">
+              <span>Run cadence</span>
+               <strong id="pipeline-cadence">—</strong>
+            </div>
+            <div class="stat">
+              <span>Missed runs (7d)</span>
+               <strong id="pipeline-missed">—</strong>
+            </div>
+            <div class="stat">
+              <span>Avg duration</span>
+               <strong id="pipeline-duration">—</strong>
+            </div>
+            <div class="sparkline">
+              <svg viewBox="0 0 240 80" aria-hidden="true">
+                <path id="pipeline-spark" />
+              </svg>
+              <div class="spark-legend">
+                <span>Duration trend (mins)</span>
+                 <strong id="pipeline-trend">—</strong>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h2>Data quality trends</h2>
+              <p>Completeness and anomaly detection over time.</p>
+            </div>
+          </div>
+          <div class="card-body two-col">
+            <div>
+              <div class="stat">
+                <span>Completeness</span>
+                 <strong id="dq-completeness">—</strong>
+              </div>
+              <div class="sparkline">
+                <svg viewBox="0 0 240 80" aria-hidden="true">
+                  <path id="completeness-spark" />
+                </svg>
+                <div class="spark-legend">
+                  <span>Last 12 runs</span>
+                   <strong id="completeness-trend">—</strong>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="stat">
+                <span>Outliers detected</span>
+                 <strong id="dq-outliers">—</strong>
+              </div>
+              <div class="sparkline">
+                <svg viewBox="0 0 240 80" aria-hidden="true">
+                  <path id="outliers-spark" />
+                </svg>
+                <div class="spark-legend">
+                  <span>Last 12 runs</span>
+                   <strong id="outliers-trend">—</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h2>Performance KPIs</h2>
+              <p>Latency and storage pressure signals.</p>
+            </div>
+          </div>
+          <div class="card-body two-col">
+            <div>
+              <div class="stat">
+                 <span>Avg processing time</span>
+                 <strong id="kpi-response">—</strong>
+              </div>
+              <div class="sparkline">
+                <svg viewBox="0 0 240 80" aria-hidden="true">
+                  <path id="response-spark" />
+                </svg>
+                <div class="spark-legend">
+                   <span>Last vs avg runtime</span>
+                   <strong id="response-trend">—</strong>
+                </div>
+              </div>
+            </div>
+            <div>
+              <div class="stat">
+                <span>Staging table size</span>
+                 <strong id="kpi-staging">—</strong>
+              </div>
+              <div class="sparkline">
+                <svg viewBox="0 0 240 80" aria-hidden="true">
+                  <path id="staging-spark" />
+                </svg>
+                <div class="spark-legend">
+                  <span>Rows ingested</span>
+                   <strong id="staging-trend">—</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>Crypto Warehouse dashboard v0.1</span>
+        <span>Designed for quick API wiring</span>
+      </footer>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
