@@ -47,6 +47,54 @@ Endpoints:
 - `GET /metrics/pipeline`
 - `GET /metrics/data-quality`
 - `GET /metrics/performance`
+- `GET /analytics/moving-averages`
+- `GET /analytics/volatility`
+- `GET /analytics/daily-volume-rank`
+- `GET /analytics/market-cap-trends`
+- `GET /analytics/price-correlation`
+- `GET /analytics/anomaly-detection`
+- `GET /analytics/market-health`
+
+Example endpoint calls:
+```bash
+curl "http://127.0.0.1:8000/analytics/moving-averages?limit=100"
+curl "http://127.0.0.1:8000/analytics/price-correlation?limit=400&min_overlap=24"
+curl "http://127.0.0.1:8000/analytics/anomaly-detection?limit=200&anomaly_only=true"
+```
+
+### Generate Insights + Exports
+Create a markdown insights report and export analytical view outputs as CSV/JSON:
+```bash
+python src/analysis_report.py --output-dir outputs --formats csv json --limit-per-view 5000
+```
+
+### Backfill Historical Data (3 Months)
+Backfill recent history from CoinGecko into staging, then parse into warehouse tables:
+```bash
+python src/backfill_history.py --days 90 --top-coins 20
+```
+
+Notes:
+- Uses CoinGecko `market_chart/range` and converts payloads to the existing staging JSON shape.
+- Inserts one staged snapshot per timestamp and then calls `sp_ParseRawData`.
+- Use `--top-coins` to control runtime/API volume and `--pause-seconds` to reduce rate-limit risk.
+
+Example output artifacts:
+- `outputs/reports/insights_YYYYMMDD_HHMMSS.md`
+- `outputs/exports/vw_moving_averages.csv`
+- `outputs/exports/vw_moving_averages.json`
+- `outputs/exports/vw_volatility.csv`
+- `outputs/exports/vw_volatility.json`
+- `outputs/exports/vw_daily_volume_rank.csv`
+- `outputs/exports/vw_daily_volume_rank.json`
+- `outputs/exports/vw_market_cap_trends.csv`
+- `outputs/exports/vw_market_cap_trends.json`
+- `outputs/exports/vw_price_correlation.csv`
+- `outputs/exports/vw_price_correlation.json`
+- `outputs/exports/vw_anomaly_detection.csv`
+- `outputs/exports/vw_anomaly_detection.json`
+- `outputs/exports/vw_market_health.csv`
+- `outputs/exports/vw_market_health.json`
 
 ### Scheduling
 To simulate a streaming environment, schedule the script to run every 10-30 minutes.
@@ -76,4 +124,8 @@ To simulate a streaming environment, schedule the script to run every 10-30 minu
     -   `vw_MovingAverages`
     -   `vw_Volatility`
     -   `vw_DailyVolumeRank`
+    -   `vw_MarketCapTrends`
+    -   `vw_PriceCorrelation`
+    -   `vw_AnomalyDetection`
+    -   `vw_MarketHealth`
 5.  **Observe**: Pipeline run status is tracked in `Pipeline_Run_Logs` and surfaced via the API.
