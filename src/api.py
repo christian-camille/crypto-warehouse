@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 import os
 import psycopg2
@@ -33,6 +33,18 @@ def get_connection():
         port=DB_PORT,
         cursor_factory=RealDictCursor
     )
+
+
+def fetch_all_rows(sql, params=None):
+    conn = get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(sql, params or ())
+        rows = cur.fetchall()
+        cur.close()
+        return rows
+    finally:
+        conn.close()
 
 
 @app.get("/metrics/pipeline")
@@ -163,18 +175,24 @@ def get_data_quality_metrics():
 
         cur.execute(
             """
-            WITH deltas AS (
+            WITH hourly_prices AS (
                 SELECT
                     CurrencyID,
-                    Timestamp,
-                    CASE
-                        WHEN LAG(PriceUSD) OVER (PARTITION BY CurrencyID ORDER BY Timestamp) IS NULL
-                            THEN NULL
-                        ELSE (PriceUSD - LAG(PriceUSD) OVER (PARTITION BY CurrencyID ORDER BY Timestamp))
-                            / NULLIF(LAG(PriceUSD) OVER (PARTITION BY CurrencyID ORDER BY Timestamp), 0)
-                            * 100
-                    END AS pct_change
+                    DATE_TRUNC('hour', Timestamp) AS HourBucket,
+                    AVG(PriceUSD) AS PriceUSD
                 FROM Fact_Market_Metrics
+                WHERE PriceUSD IS NOT NULL
+                GROUP BY CurrencyID, DATE_TRUNC('hour', Timestamp)
+            ), deltas AS (
+                SELECT
+                    current_hour.CurrencyID,
+                    current_hour.HourBucket AS Timestamp,
+                    ((current_hour.PriceUSD - previous_hour.PriceUSD)
+                        / NULLIF(previous_hour.PriceUSD, 0)) * 100 AS pct_change
+                FROM hourly_prices current_hour
+                LEFT JOIN hourly_prices previous_hour
+                    ON previous_hour.CurrencyID = current_hour.CurrencyID
+                    AND previous_hour.HourBucket = current_hour.HourBucket - INTERVAL '1 hour'
             )
             SELECT COUNT(*) AS anomaly_count
             FROM deltas
@@ -207,19 +225,26 @@ def get_data_quality_metrics():
 
         cur.execute(
             """
-            WITH deltas AS (
+            WITH hourly_prices AS (
                 SELECT
                     CurrencyID,
-                    Timestamp,
-                    CASE
-                        WHEN LAG(PriceUSD) OVER (PARTITION BY CurrencyID ORDER BY Timestamp) IS NULL
-                            THEN NULL
-                        ELSE (PriceUSD - LAG(PriceUSD) OVER (PARTITION BY CurrencyID ORDER BY Timestamp))
-                            / NULLIF(LAG(PriceUSD) OVER (PARTITION BY CurrencyID ORDER BY Timestamp), 0)
-                            * 100
-                    END AS pct_change
+                    DATE_TRUNC('hour', Timestamp) AS HourBucket,
+                    AVG(PriceUSD) AS PriceUSD
                 FROM Fact_Market_Metrics
-                WHERE Timestamp >= CURRENT_TIMESTAMP - INTERVAL '12 hours'
+                WHERE Timestamp >= CURRENT_TIMESTAMP - INTERVAL '13 hours'
+                  AND PriceUSD IS NOT NULL
+                GROUP BY CurrencyID, DATE_TRUNC('hour', Timestamp)
+            ), deltas AS (
+                SELECT
+                    current_hour.CurrencyID,
+                    current_hour.HourBucket AS Timestamp,
+                    ((current_hour.PriceUSD - previous_hour.PriceUSD)
+                        / NULLIF(previous_hour.PriceUSD, 0)) * 100 AS pct_change
+                FROM hourly_prices current_hour
+                LEFT JOIN hourly_prices previous_hour
+                    ON previous_hour.CurrencyID = current_hour.CurrencyID
+                    AND previous_hour.HourBucket = current_hour.HourBucket - INTERVAL '1 hour'
+                WHERE current_hour.HourBucket >= CURRENT_TIMESTAMP - INTERVAL '12 hours'
             ),
             hourly AS (
                 SELECT
@@ -325,6 +350,145 @@ def get_performance_metrics():
             "staging": staging,
             "row_counts": row_counts
         }
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/analytics/market-cap-trends")
+def get_market_cap_trends(limit: int = Query(default=500, ge=1, le=5000)):
+    try:
+        rows = fetch_all_rows(
+            """
+            SELECT *
+            FROM vw_MarketCapTrends
+            ORDER BY MonthStart DESC, MarketCapRank ASC
+            LIMIT %s;
+            """,
+            (limit,)
+        )
+        return {"count": len(rows), "rows": rows}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/analytics/moving-averages")
+def get_moving_averages(limit: int = Query(default=500, ge=1, le=10000)):
+    try:
+        rows = fetch_all_rows(
+            """
+            SELECT *
+            FROM vw_MovingAverages
+            ORDER BY FullDate DESC, Currency ASC
+            LIMIT %s;
+            """,
+            (limit,)
+        )
+        return {"count": len(rows), "rows": rows}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/analytics/volatility")
+def get_volatility(limit: int = Query(default=500, ge=1, le=10000)):
+    try:
+        rows = fetch_all_rows(
+            """
+            SELECT *
+            FROM vw_Volatility
+            ORDER BY Timestamp DESC, Currency ASC
+            LIMIT %s;
+            """,
+            (limit,)
+        )
+        return {"count": len(rows), "rows": rows}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/analytics/daily-volume-rank")
+def get_daily_volume_rank(limit: int = Query(default=500, ge=1, le=10000)):
+    try:
+        rows = fetch_all_rows(
+            """
+            SELECT *
+            FROM vw_DailyVolumeRank
+            ORDER BY FullDate DESC, VolumeRank ASC
+            LIMIT %s;
+            """,
+            (limit,)
+        )
+        return {"count": len(rows), "rows": rows}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/analytics/price-correlation")
+def get_price_correlation(
+    limit: int = Query(default=400, ge=1, le=10000),
+    min_overlap: int = Query(default=0, ge=0)
+):
+    try:
+        rows = fetch_all_rows(
+            """
+            SELECT *
+            FROM vw_PriceCorrelation
+            WHERE COALESCE(OverlappingObservations, 0) >= %s
+               OR BaseCurrencyID = ComparedCurrencyID
+            ORDER BY BaseMarketCapRank, ComparedMarketCapRank
+            LIMIT %s;
+            """,
+            (min_overlap, limit)
+        )
+        return {"count": len(rows), "rows": rows}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/analytics/anomaly-detection")
+def get_anomaly_detection(
+    limit: int = Query(default=500, ge=1, le=10000),
+    anomaly_only: bool = Query(default=True)
+):
+    try:
+        if anomaly_only:
+            rows = fetch_all_rows(
+                """
+                SELECT *
+                FROM vw_AnomalyDetection
+                WHERE IsAnomaly = TRUE
+                ORDER BY Timestamp DESC
+                LIMIT %s;
+                """,
+                (limit,)
+            )
+        else:
+            rows = fetch_all_rows(
+                """
+                SELECT *
+                FROM vw_AnomalyDetection
+                ORDER BY Timestamp DESC
+                LIMIT %s;
+                """,
+                (limit,)
+            )
+        return {"count": len(rows), "rows": rows}
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/analytics/market-health")
+def get_market_health(limit: int = Query(default=365, ge=1, le=5000)):
+    try:
+        rows = fetch_all_rows(
+            """
+            SELECT *
+            FROM vw_MarketHealth
+            ORDER BY FullDate DESC
+            LIMIT %s;
+            """,
+            (limit,)
+        )
+        return {"count": len(rows), "rows": rows}
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error))
 
