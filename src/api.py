@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -13,6 +14,14 @@ DB_PASS = os.getenv("DB_PASS", "password")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
 app = FastAPI(title="Crypto Warehouse Metrics API")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 def get_connection():
@@ -43,6 +52,18 @@ def get_pipeline_metrics():
                     2
                 ) AS success_rate_pct,
                 MAX(EndedAt) AS last_run_at,
+                MAX(StartedAt) AS last_started_at,
+                (
+                    SELECT Status
+                    FROM Pipeline_Run_Logs
+                    ORDER BY StartedAt DESC
+                    LIMIT 1
+                ) AS last_run_status,
+                (
+                    SELECT COUNT(*)
+                    FROM Pipeline_Run_Logs
+                    WHERE StartedAt::date = CURRENT_DATE
+                ) AS runs_today,
                 ROUND(
                     AVG(EXTRACT(EPOCH FROM (EndedAt - StartedAt)))
                     FILTER (WHERE EndedAt IS NOT NULL),
@@ -57,6 +78,41 @@ def get_pipeline_metrics():
             """
         )
         result = cur.fetchone()
+
+        cur.execute(
+            """
+            WITH recent AS (
+                SELECT StartedAt
+                FROM Pipeline_Run_Logs
+                ORDER BY StartedAt DESC
+                LIMIT 20
+            ),
+            ordered AS (
+                SELECT StartedAt, LAG(StartedAt) OVER (ORDER BY StartedAt) AS prev
+                FROM recent
+            )
+            SELECT ROUND(AVG(EXTRACT(EPOCH FROM (StartedAt - prev))) / 60, 2) AS avg_interval_minutes
+            FROM ordered
+            WHERE prev IS NOT NULL;
+            """
+        )
+        avg_interval = cur.fetchone()
+
+        cur.execute(
+            """
+            SELECT ROUND(EXTRACT(EPOCH FROM (EndedAt - StartedAt)) / 60, 2) AS minutes
+            FROM Pipeline_Run_Logs
+            WHERE EndedAt IS NOT NULL
+            ORDER BY EndedAt DESC
+            LIMIT 12;
+            """
+        )
+        durations = [row["minutes"] for row in cur.fetchall()]
+        durations.reverse()
+
+        if result is not None:
+            result["avg_interval_minutes"] = avg_interval.get("avg_interval_minutes")
+            result["duration_trend_minutes"] = durations
         cur.close()
         conn.close()
         return result
@@ -73,6 +129,10 @@ def get_data_quality_metrics():
         cur.execute(
             """
             SELECT
+                COUNT(*) AS total_rows,
+                COUNT(*) FILTER (
+                    WHERE PriceUSD IS NULL OR MarketCapUSD IS NULL OR Volume24hUSD IS NULL
+                ) AS missing_rows,
                 SUM(CASE WHEN PriceUSD IS NULL THEN 1 ELSE 0 END) AS missing_price,
                 SUM(CASE WHEN MarketCapUSD IS NULL THEN 1 ELSE 0 END) AS missing_marketcap,
                 SUM(CASE WHEN Volume24hUSD IS NULL THEN 1 ELSE 0 END) AS missing_volume
@@ -80,6 +140,13 @@ def get_data_quality_metrics():
             """
         )
         missing = cur.fetchone()
+
+        completeness_pct = None
+        if missing and missing.get("total_rows"):
+            completeness_pct = round(
+                100 * (1 - (missing.get("missing_rows", 0) / missing["total_rows"])),
+                2
+            )
 
         cur.execute(
             """
@@ -118,6 +185,58 @@ def get_data_quality_metrics():
 
         cur.execute(
             """
+            WITH hourly AS (
+                SELECT
+                    date_trunc('hour', Timestamp) AS bucket,
+                    COUNT(*) AS total_rows,
+                    COUNT(*) FILTER (
+                        WHERE PriceUSD IS NULL OR MarketCapUSD IS NULL OR Volume24hUSD IS NULL
+                    ) AS missing_rows
+                FROM Fact_Market_Metrics
+                WHERE Timestamp >= CURRENT_TIMESTAMP - INTERVAL '12 hours'
+                GROUP BY bucket
+            )
+            SELECT
+                bucket,
+                ROUND(100 * (1 - missing_rows::numeric / NULLIF(total_rows, 0)), 2) AS completeness_pct
+            FROM hourly
+            ORDER BY bucket;
+            """
+        )
+        completeness_trend = cur.fetchall()
+
+        cur.execute(
+            """
+            WITH deltas AS (
+                SELECT
+                    CurrencyID,
+                    Timestamp,
+                    CASE
+                        WHEN LAG(PriceUSD) OVER (PARTITION BY CurrencyID ORDER BY Timestamp) IS NULL
+                            THEN NULL
+                        ELSE (PriceUSD - LAG(PriceUSD) OVER (PARTITION BY CurrencyID ORDER BY Timestamp))
+                            / NULLIF(LAG(PriceUSD) OVER (PARTITION BY CurrencyID ORDER BY Timestamp), 0)
+                            * 100
+                    END AS pct_change
+                FROM Fact_Market_Metrics
+                WHERE Timestamp >= CURRENT_TIMESTAMP - INTERVAL '12 hours'
+            ),
+            hourly AS (
+                SELECT
+                    date_trunc('hour', Timestamp) AS bucket,
+                    COUNT(*) FILTER (WHERE pct_change IS NOT NULL AND ABS(pct_change) >= 50) AS outliers
+                FROM deltas
+                GROUP BY bucket
+            )
+            SELECT bucket, outliers
+            FROM hourly
+            ORDER BY bucket;
+            """
+        )
+        outliers_trend = cur.fetchall()
+
+        cur.execute(
+            """
             SELECT ErrorLevel, COUNT(*) AS count
             FROM Data_Quality_Logs
             GROUP BY ErrorLevel
@@ -133,6 +252,9 @@ def get_data_quality_metrics():
             "missing_values": missing,
             "duplicates": duplicates,
             "anomalies": anomalies,
+            "completeness_pct": completeness_pct,
+            "completeness_trend": completeness_trend,
+            "outliers_trend": outliers_trend,
             "data_quality_logs": dq_logs
         }
     except Exception as error:
@@ -176,6 +298,16 @@ def get_performance_metrics():
         cur.execute(
             """
             SELECT
+                COUNT(*) AS staging_rows,
+                pg_total_relation_size('staging_api_response') AS staging_bytes
+            FROM Staging_API_Response;
+            """
+        )
+        staging = cur.fetchone()
+
+        cur.execute(
+            """
+            SELECT
                 COUNT(*) AS total_fact_rows,
                 COUNT(*) FILTER (WHERE Timestamp >= CURRENT_TIMESTAMP - INTERVAL '24 hours') AS last_24h_rows,
                 COUNT(DISTINCT CurrencyID) AS distinct_currencies
@@ -190,7 +322,23 @@ def get_performance_metrics():
         return {
             "data_freshness": freshness,
             "processing_time": processing,
+            "staging": staging,
             "row_counts": row_counts
+        }
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error))
+
+
+@app.get("/metrics/dashboard")
+def get_dashboard_metrics():
+    try:
+        pipeline = get_pipeline_metrics()
+        data_quality = get_data_quality_metrics()
+        performance = get_performance_metrics()
+        return {
+            "pipeline": pipeline,
+            "data_quality": data_quality,
+            "performance": performance
         }
     except Exception as error:
         raise HTTPException(status_code=500, detail=str(error))
