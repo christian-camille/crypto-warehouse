@@ -8,11 +8,39 @@ This project dumps raw JSON data from the CoinGecko API into a staging table in 
 
 ## Prerequisites
 
-- **Python 3.8+**
-- **PostgreSQL 12+**
-- **Pip packages**: `requests`, `psycopg2-binary`, `python-dotenv`, `fastapi`, `uvicorn`
+- **Docker** and **Docker Compose** (for Docker setup), or:
+- **Python 3.8+**, **PostgreSQL 12+**, and **Pip packages**: `requests`, `psycopg2-binary`, `python-dotenv`, `fastapi`, `uvicorn`
 
 ## Setup
+
+### Option A: Docker (Recommended)
+
+1.  **Clone the repository**.
+2.  **Start all services**:
+    ```bash
+    docker compose up --build
+    ```
+    This starts PostgreSQL and the API server. Database schema setup runs automatically on first launch.
+
+    - API available at `http://localhost:8000`
+    - PostgreSQL available at `localhost:5432`
+
+3.  **Run pipeline commands** inside the running container:
+    ```bash
+    docker compose exec app python src/extract_load.py
+    docker compose exec app python src/backfill_history.py --days 90 --top-coins 20
+    docker compose exec app python src/analysis_report.py --output-dir outputs --formats csv json
+    ```
+
+4.  **Stop services**:
+    ```bash
+    docker compose down
+    ```
+    Add `-v` to also remove the database volume.
+
+Source code is volume-mounted (`src/`, `sql/`, `frontend/`, `outputs/`), so changes reflect without rebuilding.
+
+### Option B: Local
 
 1.  **Clone the repository**.
 2.  **Install dependencies**:
