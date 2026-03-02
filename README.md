@@ -141,20 +141,35 @@ To simulate a streaming environment, schedule the script to run every 10-30 minu
 
 ## Testing
 
-The test suite mocks all external boundaries (`requests.get`, `psycopg2.connect`) so no running database or network connection is required.
+The suite has two layers:
 
-### Install test dependency
+- **Unit tests** (`tests/test_extract_load.py`) – mock `requests.get` and `psycopg2.connect`; no running database or network required.
+- **Contract tests** (`tests/test_db_contract.py`) – connect to a real Postgres instance to verify schema objects, the stored procedure, and view column contracts. They are **automatically skipped** when Postgres is unreachable, so CI without a DB is not broken.
 
-`pytest` is not in `requirements.txt`. Install it once into your environment:
+`pytest` is included in `requirements.txt`. Install all dependencies with:
 
 ```bash
-pip install pytest
+pip install -r requirements.txt
 ```
 
 ### Run all tests
 
 ```bash
 python -m pytest tests/ -v
+```
+
+### Run only unit tests (no DB needed)
+
+```bash
+python -m pytest tests/test_extract_load.py -v
+```
+
+### Run only contract tests
+
+Contract tests use the same `.env` credentials as the rest of the project. Ensure Postgres is running and the database exists before running them.
+
+```bash
+python -m pytest tests/test_db_contract.py -v
 ```
 
 ### Run a specific test
@@ -165,7 +180,9 @@ python -m pytest tests/test_extract_load.py::TestRunPipeline::test_run_pipeline_
 
 ### Test coverage
 
-| Test class | Tests |
+**Unit tests** – `tests/test_extract_load.py`
+
+| Test class | What is verified |
 |---|---|
 | `TestGetCryptoData` | success returns parsed JSON; HTTP error returns `None` |
 | `TestLoadRawData` | inserts JSON and commits; DB error returns `False` and closes connection |
@@ -173,6 +190,14 @@ python -m pytest tests/test_extract_load.py::TestRunPipeline::test_run_pipeline_
 | `TestLogPipelineStart` | returns run ID from `fetchone()` and commits |
 | `TestLogPipelineEnd` | no-op when `run_id` is `None` (no DB connection attempted) |
 | `TestRunPipeline` | happy path calls all steps and logs `"SUCCESS"`; `None` data logs `"FAILED"` with `"No data fetched"` |
+
+**Contract tests** – `tests/test_db_contract.py` (require Postgres)
+
+| Test | What is verified |
+|---|---|
+| `test_setup_db_creates_expected_objects` | all six core tables exist in the public schema after DDL runs |
+| `test_sp_parserawdata_inserts_into_dim_and_fact` | a known staging payload produces rows in `Dim_Currency` and `Fact_Market_Metrics`; staging row is deleted by the procedure |
+| `test_views_return_expected_columns` (×7) | each analytics view exposes the column set the API endpoints depend on, preventing silent SQL drift |
 
 ## Architecture
 
