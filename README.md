@@ -139,6 +139,41 @@ To simulate a streaming environment, schedule the script to run every 10-30 minu
 */10 * * * * /usr/bin/python3 /path/to/project/src/extract_load.py
 ```
 
+## Testing
+
+The test suite mocks all external boundaries (`requests.get`, `psycopg2.connect`) so no running database or network connection is required.
+
+### Install test dependency
+
+`pytest` is not in `requirements.txt`. Install it once into your environment:
+
+```bash
+pip install pytest
+```
+
+### Run all tests
+
+```bash
+python -m pytest tests/ -v
+```
+
+### Run a specific test
+
+```bash
+python -m pytest tests/test_extract_load.py::TestRunPipeline::test_run_pipeline_happy_path_calls_log_start_load_transform_log_end_success -v
+```
+
+### Test coverage
+
+| Test class | Tests |
+|---|---|
+| `TestGetCryptoData` | success returns parsed JSON; HTTP error returns `None` |
+| `TestLoadRawData` | inserts JSON and commits; DB error returns `False` and closes connection |
+| `TestTriggerTransformation` | calls `CALL sp_ParseRawData();` and returns `True`; DB error returns `False` |
+| `TestLogPipelineStart` | returns run ID from `fetchone()` and commits |
+| `TestLogPipelineEnd` | no-op when `run_id` is `None` (no DB connection attempted) |
+| `TestRunPipeline` | happy path calls all steps and logs `"SUCCESS"`; `None` data logs `"FAILED"` with `"No data fetched"` |
+
 ## Architecture
 
 1.  **Extract**: Python fetches JSON from CoinGecko.
